@@ -1,8 +1,107 @@
-/*
+/* Grid Container */
+.grid-container {
+    display: grid;
+    gap: var(--size-4-2, 1rem);
+    grid-template-columns: repeat(var(--grid-cols, 2), 1fr);
+    grid-template-rows: repeat(var(--grid-rows, 2), var(--cell-height, 120px));
+    margin: 1rem 0 2rem 0;
+    padding: 0.5rem;
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+/* Grid Cells */
+.grid-cell {
+    padding: var(--size-4-2, 0.75rem);
+    background: var(--background-primary);
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-s);
+    overflow: auto;
+    position: relative;
+    min-height: 80px;
+}
 
-If your plugin does not need CSS, delete this file.
+/* No borders mode */
+.grid-container.no-borders .grid-cell {
+    border: none;
+    background: transparent;
+}
 
-*/
+.grid-container.no-borders {
+    background: transparent;
+    padding: 0;
+}
+
+/* Cell placeholder for empty cells */
+.grid-cell-placeholder {
+    height: 100%;
+    min-height: 40px;
+    opacity: 0.3;
+    background: repeating-linear-gradient(
+        45deg,
+        transparent,
+        transparent 8px,
+        var(--border-color) 8px,
+        var(--border-color) 10px
+    );
+    border-radius: var(--radius-s);
+}
+
+.grid-container.no-borders .grid-cell-placeholder {
+    display: none;
+}
+
+/* Image handling in grid cells */
+.grid-cell img {
+    max-width: 100%;
+    height: auto;
+    object-fit: contain;
+    border-radius: var(--radius-s);
+}
+
+/* Responsive behavior */
+@media (max-width: 768px) {
+    .grid-container {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
+        gap: var(--size-4-1, 0.5rem);
+    }
+    
+    .grid-cell {
+        grid-column: 1 !important;
+        grid-row: auto !important;
+        min-height: 60px;
+    }
+}
+
+/* Typography adjustments in cells */
+.grid-cell h1, .grid-cell h2, .grid-cell h3, 
+.grid-cell h4, .grid-cell h5, .grid-cell h6 {
+    margin-top: 0;
+    margin-bottom: 0.5em;
+}
+
+.grid-cell p {
+    margin-bottom: 0.75em;
+}
+
+.grid-cell p:last-child {
+    margin-bottom: 0;
+}
+
+/* Math/LaTeX in grid cells */
+.grid-cell .math {
+    text-align: center;
+    margin: 0.5em 0;
+}
+
+/* Lists in grid cells */
+.grid-cell ul, .grid-cell ol {
+    padding-left: 1.5em;
+    margin: 0.5em 0;
+}
+
+/* Callouts in grid cells */
+.grid-cell .callout {
+    margin: 0.5em 0;
+}

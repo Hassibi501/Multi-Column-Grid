@@ -1,10 +1,11 @@
 {
-    "id": "image-context-menu",
-    "name": "Image Context Menu",
-    "version": "1.0.0",
+    "id": "multi-column-grid",
+    "name": "Multi-Column Grid",
+    "version": "0.1.0",
     "minAppVersion": "0.15.0",
-    "description": "Right-click context menu for positioning images in Obsidian notes",
-    "author": "Your Name",
-    "authorUrl": "https://github.com/yourusername",
+    "description": "Create grid-based layouts in markdown with spatial positioning",
+    "author": "Hassieb",
+    "authorUrl": "",
+    "fundingUrl": "",
     "isDesktopOnly": false
 }
