@@ -1,18 +1,28 @@
-import { 
-    Plugin, 
-    MarkdownPostProcessorContext, 
-    Editor, 
-    MarkdownView, 
-    MarkdownRenderer, 
+function logUnknownError(e: unknown, context: string) {
+    if (e instanceof Error) console.error(`${context}:`, e.message);
+    else console.error(`${context}:`, String(e));
+}
+
+import {
+    Plugin,
+    MarkdownPostProcessorContext,
+    Editor,
+    MarkdownView,
+    MarkdownRenderer,
     Component,
-    MarkdownFileInfo 
-} from 'obsidian';
+    MarkdownFileInfo,
+    Notice,
+} from "obsidian";
 
 interface GridSettings {
     columns: number;
     rows: number;
     showBorders: boolean;
     cellHeight?: string;
+    dynamicHeight?: boolean;
+    invisibleMode?: boolean;
+    colWidths?: string;
+    rowHeights?: string;
 }
 
 interface GridCell {
@@ -23,206 +33,257 @@ interface GridCell {
 }
 
 export default class MultiColumnGridPlugin extends Plugin {
-    
+    private globalInvisible = false;
+
     async onload() {
-        console.log('Loading Multi-Column Grid Plugin');
-        
-        // Register markdown post processor for reading mode
-        this.registerMarkdownPostProcessor((element: HTMLElement, context: MarkdownPostProcessorContext) => {
-            this.processGridBlocks(element, context);
+        console.log("Multi-Column Grid Plugin loaded successfully");
+
+        /* ---------- render blocks ---------- */
+        this.registerMarkdownPostProcessor(
+            (el: HTMLElement, ctx: MarkdownPostProcessorContext) =>
+                this.processBlocks(el, ctx),
+            1000,
+        );
+
+        /* ---------- ONLY dynamic template commands ---------- */
+        this.addCommand({
+            id: "insert-dynamic-2col",
+            name: "Insert Dynamic 2-Column Grid",
+            editorCallback: (ed: Editor) =>
+                ed.replaceSelection(this.makeTemplate(2, 6, true)),
         });
         
-        // Add command to insert grid template
         this.addCommand({
-            id: 'insert-grid-template',
-            name: 'Insert Grid Template',
-            editorCallback: (editor: Editor, ctx: MarkdownView | MarkdownFileInfo) => {
-                const template = this.getGridTemplate(3, 2);
-                editor.replaceSelection(template);
-            }
+            id: "insert-dynamic-3col", 
+            name: "Insert Dynamic 3-Column Grid",
+            editorCallback: (ed: Editor) =>
+                ed.replaceSelection(this.makeTemplate(3, 6, true)),
+        });
+
+        /* ---------- invisible-mode toggle ---------- */
+        this.addCommand({
+            id: "toggle-grid-invisible",
+            name: "Toggle Global Invisible Mode",
+            callback: () => {
+                this.globalInvisible = !this.globalInvisible;
+                document.body.classList.toggle(
+                    "grid-global-invisible",
+                    this.globalInvisible,
+                );
+                new Notice(
+                    `Grid invisible mode ${this.globalInvisible ? "ON" : "OFF"}`,
+                );
+            },
         });
     }
 
     onunload() {
-        console.log('Unloading Multi-Column Grid Plugin');
+        document.body.classList.remove("grid-global-invisible");
+        console.log("Multi-Column Grid Plugin unloaded");
     }
 
-    private processGridBlocks(element: HTMLElement, context: MarkdownPostProcessorContext) {
-        const codeBlocks = element.querySelectorAll('pre > code');
-        
-        codeBlocks.forEach((codeBlock) => {
-            const content = codeBlock.textContent || '';
-            
-            // Look for grid blocks
-            if (content.includes('=== start-grid:')) {
-                this.renderGrid(codeBlock.parentElement as HTMLElement, content, context);
-            }
+    /* ────────── parsing & rendering ────────── */
+
+    private processBlocks(el: HTMLElement, ctx: MarkdownPostProcessorContext) {
+        el.querySelectorAll("pre > code").forEach(code => {
+            const txt = code.textContent ?? "";
+            if (txt.includes("=== start-grid:"))
+                this.renderGrid(code.parentElement as HTMLElement, txt, ctx);
         });
     }
 
-    private renderGrid(preElement: HTMLElement, content: string, context: MarkdownPostProcessorContext) {
+    private async renderGrid(
+        pre: HTMLElement,
+        src: string,
+        ctx: MarkdownPostProcessorContext,
+    ) {
         try {
-            const gridData = this.parseGridContent(content);
-            if (!gridData) return;
+            const { settings, cells } = this.parse(src);
+            const grid = this.buildGrid(settings, cells);
+            pre.replaceWith(grid);
 
-            const gridContainer = this.createGridHTML(gridData);
-            preElement.replaceWith(gridContainer);
-            
-            // Render markdown content in each cell
-            gridData.cells.forEach((cell) => {
-                const cellElement = gridContainer.querySelector(`[data-cell="${cell.id}"]`) as HTMLElement;
-                if (cellElement && cell.content.trim()) {
-                    MarkdownRenderer.renderMarkdown(
-                        cell.content,
-                        cellElement,
-                        context.sourcePath,
-                        new Component()
-                    );
-                }
-            });
-            
-        } catch (error) {
-            console.error('Error rendering grid:', error);
+            for (const cell of cells) {
+                const target = grid.querySelector(
+                    `[data-cell='${cell.id}']`,
+                ) as HTMLElement;
+                if (!target) continue;
+                await MarkdownRenderer.renderMarkdown(
+                    cell.content,
+                    target,
+                    ctx.sourcePath,
+                    new Component(),
+                );
+                this.fixImages(target, settings.columns);
+            }
+        } catch (e) {
+            logUnknownError(e, "renderGrid");
         }
     }
 
-    private parseGridContent(content: string): { settings: GridSettings; cells: GridCell[] } | null {
-        const lines = content.split('\n');
-        let settings: GridSettings = { columns: 2, rows: 2, showBorders: true };
-        const cells: GridCell[] = [];
-        
-        let currentCell: GridCell | null = null;
-        let inSettings = false;
-        let cellContent: string[] = [];
+    /* ────────── helpers ────────── */
 
-        for (const line of lines) {
-            const trimmed = line.trim();
-            
-            // Parse settings section
-            if (trimmed === 'grid-settings') {
+    private parse(src: string): { settings: GridSettings; cells: GridCell[] } {
+        const s: GridSettings = {
+            columns: 2,
+            rows: 2,
+            showBorders: true,
+            dynamicHeight: true, // default to dynamic
+        };
+        const cells: GridCell[] = [];
+        let cur: GridCell | null = null,
+            inSettings = false,
+            buf: string[] = [];
+
+        for (const raw of src.split("\n")) {
+            const line = raw.trim();
+
+            if (line === "grid-settings") {
                 inSettings = true;
                 continue;
             }
-            
-            if (inSettings && trimmed === '') {
+            if (inSettings && line === "") {
                 inSettings = false;
                 continue;
             }
-            
             if (inSettings) {
-                if (trimmed.startsWith('columns:')) {
-                    settings.columns = parseInt(trimmed.split(':')[1].trim()) || 2;
-                } else if (trimmed.startsWith('rows:')) {
-                    settings.rows = parseInt(trimmed.split(':')[1].trim()) || 2;
-                } else if (trimmed.startsWith('show-borders:')) {
-                    settings.showBorders = trimmed.split(':')[1].trim() === 'true';
-                } else if (trimmed.startsWith('cell-height:')) {
-                    settings.cellHeight = trimmed.split(':')[1].trim();
+                const [k, v] = line.split(":").map(t => t.trim());
+                switch (k) {
+                    case "columns":
+                        s.columns = Number(v) || 2;
+                        break;
+                    case "rows":
+                        s.rows = Number(v) || 2;
+                        break;
+                    case "show-borders":
+                        s.showBorders = v === "true";
+                        break;
+                    case "cell-height":
+                        s.cellHeight = v;
+                        break;
+                    case "dynamic-height":
+                        s.dynamicHeight = v === "true";
+                        break;
+                    case "invisible-mode":
+                        s.invisibleMode = v === "true";
+                        break;
+                    case "col-widths":
+                        s.colWidths = v;
+                        break;
+                    case "row-heights":
+                        s.rowHeights = v;
+                        break;
                 }
                 continue;
             }
-            
-            // Parse cell blocks
-            const cellMatch = trimmed.match(/^=== cell ([A-Z]\d+) ===$/);
-            if (cellMatch) {
-                // Save previous cell
-                if (currentCell) {
-                    currentCell.content = cellContent.join('\n').trim();
-                    cells.push(currentCell);
-                    cellContent = [];
+
+            const m = line.match(/^=== cell ([A-Z]\d+) ===$/);
+            if (m) {
+                if (cur) {
+                    cur.content = buf.join("\n").trim();
+                    cells.push(cur);
+                    buf = [];
                 }
-                
-                // Start new cell
-                const cellId = cellMatch[1];
-                const column = cellId.charCodeAt(0) - 'A'.charCodeAt(0);
-                const row = parseInt(cellId.substring(1)) - 1;
-                
-                currentCell = {
-                    id: cellId,
-                    content: '',
-                    row,
-                    column
+                const id = m[1];
+                cur = {
+                    id,
+                    row: Number(id.slice(1)) - 1,
+                    column: id.charCodeAt(0) - 65,
+                    content: "",
                 };
                 continue;
             }
-            
-            // Skip grid control lines
-            if (trimmed.startsWith('=== start-grid:') || trimmed === '=== end-grid') {
+
+            if (line.startsWith("=== start-grid:") || line === "=== end-grid")
                 continue;
+            if (cur) buf.push(raw);
+        }
+        if (cur) {
+            cur.content = buf.join("\n").trim();
+            cells.push(cur);
+        }
+        return { settings: s, cells };
+    }
+
+    private buildGrid(s: GridSettings, cells: GridCell[]): HTMLElement {
+        const c = document.createElement("div");
+        c.className = "grid-container" +
+            (s.showBorders ? "" : " no-borders") +
+            (s.dynamicHeight ? " dynamic-height" : "") +
+            (s.invisibleMode ? " invisible-mode" : "") +
+            ` grid-cols-${s.columns}`; // Add column-specific class
+
+        c.style.setProperty("--grid-cols", String(s.columns));
+        c.style.setProperty("--grid-rows", String(s.rows));
+
+        // Set smart column widths that prevent overflow
+        if (s.colWidths) {
+            c.style.gridTemplateColumns = s.colWidths;
+        } else {
+            // Default: flexible but bounded columns
+            c.style.gridTemplateColumns = `repeat(${s.columns}, minmax(0, 1fr))`;
+        }
+
+        if (s.rowHeights) {
+            c.style.gridTemplateRows = s.rowHeights;
+        } else if (s.dynamicHeight) {
+            c.style.gridTemplateRows = `repeat(${s.rows}, minmax(min-content, max-content))`;
+        } else if (s.cellHeight) {
+            c.style.setProperty("--cell-height", s.cellHeight);
+        }
+
+        for (let r = 0; r < s.rows; r++)
+            for (let col = 0; col < s.columns; col++) {
+                const id = String.fromCharCode(65 + col) + (r + 1);
+                const d = document.createElement("div");
+                d.className = "grid-cell";
+                d.dataset.cell = id;
+                d.style.gridRow = String(r + 1);
+                d.style.gridColumn = String(col + 1);
+                if (!cells.find(v => v.id === id))
+                    d.innerHTML = `<div class="grid-cell-placeholder"></div>`;
+                c.append(d);
+            }
+        return c;
+    }
+
+    private fixImages(container: HTMLElement, columns: number) {
+        container.querySelectorAll("img").forEach(img => {
+            img.addClass("grid-cell-image");
+            
+            // Apply column-specific sizing
+            if (columns === 2) {
+                img.addClass("grid-img-2col");
+            } else if (columns === 3) {
+                img.addClass("grid-img-3col");
             }
             
-            // Collect cell content
-            if (currentCell) {
-                cellContent.push(line);
-            }
-        }
-        
-        // Save last cell
-        if (currentCell) {
-            currentCell.content = cellContent.join('\n').trim();
-            cells.push(currentCell);
-        }
-        
-        return { settings, cells };
+            img.onerror = () => {
+                img.style.display = "none";
+                const badge = document.createElement("div");
+                badge.className = "grid-image-error";
+                badge.textContent = "🖼️ Image not found";
+                img.parentElement?.append(badge);
+            };
+        });
     }
 
-    private createGridHTML(gridData: { settings: GridSettings; cells: GridCell[] }): HTMLElement {
-        const { settings, cells } = gridData;
-        
-        const container = document.createElement('div');
-        container.className = `grid-container ${settings.showBorders ? '' : 'no-borders'}`;
-        container.style.setProperty('--grid-cols', settings.columns.toString());
-        container.style.setProperty('--grid-rows', settings.rows.toString());
-        
-        if (settings.cellHeight) {
-            container.style.setProperty('--cell-height', settings.cellHeight);
+    /* ────────── template generator ────────── */
+private makeTemplate(cols: number, rows: number, dyn = false): string {
+    const hSetting = dyn ? "dynamic-height: true" : "cell-height: 120px";
+    const id = Date.now();
+    let out = "```\n";  // Fixed: properly terminated string with newline
+    out += `=== start-grid: ID_${id}\n\n`;
+    out += `grid-settings\n`;
+    out += `columns: ${cols}\nrows: ${rows}\nshow-borders: true\n${hSetting}\n\n`;
+    for (let r = 1; r <= rows; r++)
+        for (let c = 0; c < cols; c++) {
+            const cellId = String.fromCharCode(65 + c) + r;
+            out += `=== cell ${cellId} ===\n`;
+            out += `<!-- start of ${cellId} -->\n`;
+            out += `Content for ${cellId}\n`;
+            out += `<!-- end of ${cellId} -->\n\n`;
         }
-        
-        // Create all grid cells
-        for (let row = 0; row < settings.rows; row++) {
-            for (let col = 0; col < settings.columns; col++) {
-                const cellElement = document.createElement('div');
-                cellElement.className = 'grid-cell';
-                
-                const cellId = String.fromCharCode('A'.charCodeAt(0) + col) + (row + 1);
-                cellElement.setAttribute('data-cell', cellId);
-                cellElement.style.gridRow = (row + 1).toString();
-                cellElement.style.gridColumn = (col + 1).toString();
-                
-                // Find content for this cell
-                const cellData = cells.find(cell => cell.id === cellId);
-                if (!cellData || !cellData.content.trim()) {
-                    cellElement.innerHTML = '<div class="grid-cell-placeholder"></div>';
-                }
-                
-                container.appendChild(cellElement);
-            }
-        }
-        
-        return container;
-    }
+    return out + "=== end-grid\n```"
+}
 
-    private getGridTemplate(columns: number, rows: number): string {
-        let template = `\`\`\`
-=== start-grid: ID_${Date.now()}
-
-grid-settings
-columns: ${columns}
-rows: ${rows}
-show-borders: true
-cell-height: 120px
-
-`;
-        
-        // Add sample cells
-        for (let row = 1; row <= rows; row++) {
-            for (let col = 0; col < columns; col++) {
-                const cellId = String.fromCharCode('A'.charCodeAt(0) + col) + row;
-                template += `=== cell ${cellId} ===\n<!-- Content for ${cellId} -->\n\n`;
-            }
-        }
-        
-        template += '=== end-grid\n```'
-        return template;
-    }
 }

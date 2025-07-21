@@ -1,11 +1,11 @@
 {
-    "id": "multi-column-grid",
-    "name": "Multi-Column Grid",
-    "version": "0.1.0",
-    "minAppVersion": "0.15.0",
-    "description": "Create grid-based layouts in markdown with spatial positioning",
-    "author": "Hassieb",
-    "authorUrl": "",
-    "fundingUrl": "",
-    "isDesktopOnly": false
+  "id": "multi-column-grid",
+  "name": "Multi-Column Grid",
+  "version": "0.2.0",
+  "minAppVersion": "0.15.0",
+  "description": "Dynamic two-/three-column grids with image fixes & invisible mode.",
+  "author": "Hassibi501",
+  "main": "main.js",
+  "css": "styles.css",
+  "isDesktopOnly": false
 }
