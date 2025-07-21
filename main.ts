@@ -1,134 +1,180 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, Menu } from 'obsidian';
 
-// Remember to rename these classes and interfaces!
+export default class ImageContextMenu extends Plugin {
+    async onload() {
+        console.log('Loading Image Context Menu plugin');
 
-interface MyPluginSettings {
-	mySetting: string;
-}
+        // Register context menu event for images
+        this.registerDomEvent(document, 'contextmenu', (evt: MouseEvent) => {
+            const target = evt.target as HTMLElement;
+            
+            // Check if right-clicked element is an image
+            if (target.tagName === 'IMG') {
+                evt.preventDefault();
+                this.showImageContextMenu(evt, target);
+            }
+        });
+    }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
+    private showImageContextMenu(event: MouseEvent, imgElement: HTMLElement) {
+        const menu = new Menu();
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+        // Position submenu
+        menu.addItem((item) => {
+            item
+                .setTitle("📍 Float Left")
+                .onClick(() => {
+                    this.applyImagePosition(imgElement, 'float-left');
+                    new Notice('Image positioned left');
+                });
+        });
 
-	async onload() {
-		await this.loadSettings();
+        menu.addItem((item) => {
+            item
+                .setTitle("📍 Float Right")
+                .onClick(() => {
+                    this.applyImagePosition(imgElement, 'float-right');
+                    new Notice('Image positioned right');
+                });
+        });
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+        menu.addItem((item) => {
+            item
+                .setTitle("🎯 Center Image")
+                .onClick(() => {
+                    this.applyImagePosition(imgElement, 'center');
+                    new Notice('Image centered');
+                });
+        });
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
+        menu.addSeparator();
 
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
+        // Size submenu
+        menu.addItem((item) => {
+            item
+                .setTitle("🔍 Small")
+                .onClick(() => {
+                    this.applyImageSize(imgElement, 'small');
+                    new Notice('Image resized to small');
+                });
+        });
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
+        menu.addItem((item) => {
+            item
+                .setTitle("⚖️ Medium")
+                .onClick(() => {
+                    this.applyImageSize(imgElement, 'medium');
+                    new Notice('Image resized to medium');
+                });
+        });
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+        menu.addItem((item) => {
+            item
+                .setTitle("📏 Large")
+                .onClick(() => {
+                    this.applyImageSize(imgElement, 'large');
+                    new Notice('Image resized to large');
+                });
+        });
 
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
+        menu.addSeparator();
 
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-	}
+        menu.addItem((item) => {
+            item
+                .setTitle("🔄 Clear Positioning")
+                .onClick(() => {
+                    this.clearImageStyles(imgElement);
+                    new Notice('Image styling cleared');
+                });
+        });
 
-	onunload() {
+        menu.showAtMouseEvent(event);
+    }
 
-	}
+    private applyImagePosition(imgElement: HTMLElement, position: string) {
+        // Find the actual markdown source and update it
+        this.updateImageMarkdownInEditor(imgElement, position, null);
+    }
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	}
+    private applyImageSize(imgElement: HTMLElement, size: string) {
+        // Find the actual markdown source and update it
+        this.updateImageMarkdownInEditor(imgElement, null, size);
+    }
 
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
-}
+    private clearImageStyles(imgElement: HTMLElement) {
+        // Clear all positioning by removing modifiers from markdown
+        this.updateImageMarkdownInEditor(imgElement, 'clear', null);
+    }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
+    private updateImageMarkdownInEditor(imgElement: HTMLElement, position: string | null, size: string | null) {
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!activeView) return;
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
+        const editor = activeView.editor;
+        const cursor = editor.getCursor();
+        
+        // Get the current line
+        const currentLine = editor.getLine(cursor.line);
+        
+        // Look for image syntax in current line or nearby lines
+        const imageRegex = /!\[\[([^\]]*)\]\]/g;
+        let match;
+        let foundImage = false;
+        
+        // Check current line and a few lines around cursor
+        for (let i = Math.max(0, cursor.line - 2); i <= Math.min(editor.lastLine(), cursor.line + 2); i++) {
+            const line = editor.getLine(i);
+            imageRegex.lastIndex = 0;
+            
+            while ((match = imageRegex.exec(line)) !== null) {
+                const fullMatch = match[0];
+                const innerContent = match[1];
+                
+                // Parse existing modifiers
+                let parts = innerContent.split('|');
+                let filename = parts[0];
+                let modifiers = parts.slice(1);
+                
+                // Remove existing position and size modifiers
+                modifiers = modifiers.filter(mod => 
+                    !['left', 'right', 'center', 'float-left', 'float-right', 'small', 'medium', 'large'].includes(mod.trim())
+                );
+                
+                // Add new position modifier
+                if (position && position !== 'clear') {
+                    modifiers.push(position);
+                }
+                
+                // Add new size modifier
+                if (size) {
+                    modifiers.push(size);
+                }
+                
+                // Reconstruct the image syntax
+                let newImageSyntax;
+                if (modifiers.length > 0) {
+                    newImageSyntax = `![[${filename}|${modifiers.join('|')}]]`;
+                } else {
+                    newImageSyntax = `![[${filename}]]`;
+                }
+                
+                // Replace in the line
+                const newLine = line.replace(fullMatch, newImageSyntax);
+                editor.setLine(i, newLine);
+                
+                foundImage = true;
+                break;
+            }
+            
+            if (foundImage) break;
+        }
+        
+        if (!foundImage) {
+            new Notice('Could not find image to modify');
+        }
+    }
 
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const {containerEl} = this;
-
-		containerEl.empty();
-
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
-	}
+    onunload() {
+        console.log('Unloading Image Context Menu plugin');
+    }
 }
